@@ -29,7 +29,7 @@ app.post('/api/chat', async (req, res) => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 1024,
+        max_tokens: 512,
         temperature: mode === 'create' ? 0.9 : mode === 'reflect' ? 0.8 : 0.7,
         messages: [{ role: 'system', content: systemPrompt }, ...messages]
       })
