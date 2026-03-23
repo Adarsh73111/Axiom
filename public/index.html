@@ -293,6 +293,16 @@
       </div>
       <div class="sidebar-section">
         <div class="sidebar-title">Voice Activity</div>
+        <div class="sidebar-section" style="margin-top:16px">
+            <div class="sidebar-title">Voice Selection</div>
+            <select id="voice-picker" onchange="setVoice(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-family:var(--font-mono);font-size:11px;cursor:pointer;outline:none;margin-bottom:4px">
+              <option value="">Auto (best available)</option>
+            </select>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button onclick="previewVoice()" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px;border-radius:6px;font-family:var(--font-mono);font-size:10px;cursor:pointer;letter-spacing:1px">▶ PREVIEW</button>
+              <button onclick="selectedVoice=null;document.getElementById('voice-picker').value=''" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px;border-radius:6px;font-family:var(--font-mono);font-size:10px;cursor:pointer;letter-spacing:1px">↺ AUTO</button>
+            </div>
+          </div>
         <div class="voice-stats">
           <div class="voice-stat">
             <div class="vstat-icon">🎙</div>
@@ -378,7 +388,7 @@
 //  STATE
 // ════════════════════════════════════════════
 let history=[], exportLog=[], isLoading=false, mode='explore', topicMap={}, msgCount=0, voiceCount=0, spokenCount=0;
-let voiceReplyOn=true, recognition=null, isListening=false, capturedText='';
+let voiceReplyOn=true, recognition=null, isListening=false, capturedText='', selectedVoice=null;
 let audioCtx=null, analyser=null, micStream=null, animId=null, waveInt=null;
 
 // ════════════════════════════════════════════
@@ -404,7 +414,28 @@ if(!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)){
   document.getElementById('mic-btn').disabled=true;
   document.getElementById('browser-warn').classList.add('visible');
 }
-if('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged=()=>{};
+if('speechSynthesis' in window){
+  const initVoices=()=>{
+    const voices=speechSynthesis.getVoices().filter(v=>v.lang.startsWith('en'));
+    const picker=document.getElementById('voice-picker');
+    if(!picker||picker.options.length>1) return;
+    voices.forEach(v=>{
+      const opt=document.createElement('option');
+      opt.value=v.name; opt.textContent=v.name+(v.default?' (default)':'');
+      picker.appendChild(opt);
+    });
+  };
+  window.speechSynthesis.onvoiceschanged=initVoices;
+  setTimeout(initVoices,500);
+}
+function setVoice(name){ selectedVoice=name||null; }
+function previewVoice(){
+  const utt=new SpeechSynthesisUtterance('Hello, I am AXIOM. This is how I sound.');
+  const voices=speechSynthesis.getVoices();
+  if(selectedVoice){ const v=voices.find(v=>v.name===selectedVoice); if(v) utt.voice=v; }
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utt);
+}
 
 async function checkHealth(){
   try{
@@ -539,8 +570,13 @@ function speak(text){
   const utt=new SpeechSynthesisUtterance(clean);
   utt.rate=1.0; utt.pitch=1.0; utt.volume=1.0;
   const voices=speechSynthesis.getVoices();
-  const pick=voices.find(v=>v.name.includes('Samantha')||v.name.includes('Daniel')||v.name.includes('Google UK English Female')||v.name.includes('Google US English')||(v.lang==='en-US'&&!v.name.toLowerCase().includes('compact')))||voices.find(v=>v.lang.startsWith('en'));
-  if(pick) utt.voice=pick;
+  if(selectedVoice){
+    const pick=voices.find(v=>v.name===selectedVoice);
+    if(pick) utt.voice=pick;
+  } else {
+    const pick=voices.find(v=>v.name.includes('Samantha')||v.name.includes('Daniel')||v.name.includes('Google UK English Female')||v.name.includes('Google US English')||(v.lang==='en-US'&&!v.name.toLowerCase().includes('compact')))||voices.find(v=>v.lang.startsWith('en'));
+    if(pick) utt.voice=pick;
+  }
   utt.onstart=()=>{
     document.getElementById('speaking-overlay').classList.add('visible');
     spokenCount++; document.getElementById('spoken-count').textContent=spokenCount;
