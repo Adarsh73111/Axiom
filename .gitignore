@@ -1,0 +1,15 @@
+# ─── Secret files — NEVER upload these ──────────────────────────────
+.env
+
+# ─── Node.js ─────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── OS files ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Editor folders ──────────────────────────────────────────────────
+.vscode/settings.json
