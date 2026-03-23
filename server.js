@@ -43,6 +43,33 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+app.post('/api/chat/stream', async (req, res) => {
+  const apiKey = process.env.GROQ_API_KEY;
+  const { messages, systemPrompt, mode } = req.body;
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 512,
+        temperature: mode === 'create' ? 0.9 : mode === 'reflect' ? 0.8 : 0.7,
+        stream: true,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages]
+      })
+    });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    for await (const chunk of response.body) {
+      res.write(chunk);
+    }
+    res.end();
+  } catch (err) { res.status(500).json({ error: 'Server error: ' + err.message }); }
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {

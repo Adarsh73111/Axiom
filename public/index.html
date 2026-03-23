@@ -641,6 +641,26 @@ function removeTyping(){document.getElementById('typing')?.remove()}
 // ════════════════════════════════════════════
 //  SEND
 // ════════════════════════════════════════════
+function addStreamingMsg(uTopics){
+  document.getElementById('welcome')?.remove();
+  msgCount++; document.getElementById('msg-count').textContent=msgCount;
+  const c=document.getElementById('messages'), div=document.createElement('div');
+  div.className='message ai';
+  const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  div.innerHTML=`<div class="avatar ai">AX</div><div class="bubble-wrap"><div class="bubble"></div><div class="meta">${time}</div></div>`;
+  c.appendChild(div); c.scrollTop=c.scrollHeight;
+  return {bubbleEl:div.querySelector('.bubble'), msgEl:div};
+}
+function finalizeStreamingMsg(msgEl,fullReply,uTopics){
+  const aTopics=detectTopics(fullReply);
+  const allTopics=[...new Set([...uTopics,...aTopics])];
+  const tags=allTopics.length?`<div class="context-tags">${allTopics.map(t=>{const clr=topicMap[t]?.color||getTopicColor(t);return`<span class="ctx-tag" style="color:${clr};border-color:${clr}44;background:${clr}0d">${t}</span>`}).join('')}</div>`:'';
+  const safeContent=JSON.stringify(fullReply);
+  const replay=`<button class="replay-btn" onclick="speak(${safeContent})"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>Read aloud</button>`;
+  const bw=msgEl.querySelector('.bubble-wrap');
+  const time=msgEl.querySelector('.meta').textContent;
+  bw.innerHTML=`<div class="bubble">${fmt(fullReply)}</div>${tags}<div class="meta">${time}${replay}</div>`;
+}
 async function sendMessage(fromVoice=false){
   const inp=document.getElementById('chat-input'), text=inp.value.trim();
   if(!text||isLoading) return;
@@ -652,16 +672,32 @@ async function sendMessage(fromVoice=false){
   history.push({role:'user',content:text});
   showTyping();
   try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history,systemPrompt:MODES[mode].sys,mode})});
-    const data=await res.json();
-    if(!res.ok) throw new Error(data.error||'Server error');
-    const reply=data.reply||'';
-    history.push({role:'assistant',content:reply});
+    const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history,systemPrompt:MODES[mode].sys,mode})});
+    if(!res.ok){const d=await res.json();throw new Error(d.error||'Server error');}
     removeTyping();
-    const aTopics=detectTopics(reply);
-    addMsg('ai',reply,[...new Set([...uTopics,...aTopics])]);
-    updateSidebar(text,reply);
-    if(voiceReplyOn) setTimeout(()=>speak(reply),300);
+    const {bubbleEl,msgEl}=addStreamingMsg(uTopics);
+    const reader=res.body.getReader(), decoder=new TextDecoder();
+    let fullReply='', buffer='';
+    while(true){
+      const {done,value}=await reader.read();
+      if(done) break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n'); buffer=lines.pop();
+      for(const line of lines){
+        if(!line.startsWith('data: ')) continue;
+        const data=line.slice(6).trim();
+        if(data==='[DONE]') break;
+        try{
+          const json=JSON.parse(data);
+          const token=json.choices?.[0]?.delta?.content||'';
+          if(token){fullReply+=token; bubbleEl.innerHTML=fmt(fullReply); document.getElementById('messages').scrollTop=document.getElementById('messages').scrollHeight;}
+        }catch(e){}
+      }
+    }
+    history.push({role:'assistant',content:fullReply});
+    finalizeStreamingMsg(msgEl,fullReply,uTopics);
+    updateSidebar(text,fullReply);
+    if(voiceReplyOn) setTimeout(()=>speak(fullReply),300);
   }catch(err){
     removeTyping();
     const c=document.getElementById('messages'), d=document.createElement('div');
