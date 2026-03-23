@@ -227,6 +227,8 @@
       <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
       Voice Reply
     </button>
+    <button class="clear-btn" onclick="exportTXT()" title="Download as text file" style="background:transparent;border:1px solid var(--accent);color:var(--accent);margin-right:6px">Export TXT</button>
+    <button class="clear-btn" onclick="exportPDF()" title="Download as HTML/PDF" style="background:transparent;border:1px solid #a78bfa;color:#a78bfa;margin-right:6px">Export PDF</button>
     <button class="clear-btn" onclick="clearChat()">Clear</button>
   </div>
 </header>
@@ -375,7 +377,7 @@
 // ════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════
-let history=[], isLoading=false, mode='explore', topicMap={}, msgCount=0, voiceCount=0, spokenCount=0;
+let history=[], exportLog=[], isLoading=false, mode='explore', topicMap={}, msgCount=0, voiceCount=0, spokenCount=0;
 let voiceReplyOn=true, recognition=null, isListening=false, capturedText='';
 let audioCtx=null, analyser=null, micStream=null, animId=null, waveInt=null;
 
@@ -628,6 +630,7 @@ function addMsg(role,content,topics=[],isVoice=false){
   const replay=role==='ai'?`<button class="replay-btn" onclick="speak(${safeContent})"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>Read aloud</button>`:'';
   div.innerHTML=`<div class="avatar ${role}">${role==='ai'?'AX':'U'}</div><div class="bubble-wrap"><div class="bubble">${role==='ai'?fmt(content):content.replace(/\n/g,'<br>')}</div>${tags}<div class="meta">${time}${vbadge}${replay}</div></div>`;
   c.appendChild(div); c.scrollTop=c.scrollHeight;
+  exportLog.push({role,content,time,isVoice,topics});
 }
 function showTyping(){
   document.getElementById('welcome')?.remove();
@@ -697,6 +700,7 @@ async function sendMessage(fromVoice=false){
     history.push({role:'assistant',content:fullReply});
     finalizeStreamingMsg(msgEl,fullReply,uTopics);
     updateSidebar(text,fullReply);
+    exportLog.push({role:'ai',content:fullReply,time:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),isVoice:false,topics:detectTopics(fullReply)});
     if(voiceReplyOn) setTimeout(()=>speak(fullReply),300);
   }catch(err){
     removeTyping();
@@ -711,11 +715,62 @@ async function sendMessage(fromVoice=false){
 function sendStarter(text){document.getElementById('chat-input').value=text;sendMessage()}
 
 // ════════════════════════════════════════════
+//  EXPORT
+// ════════════════════════════════════════════
+function exportTXT(){
+  if(!exportLog.length){alert('Nothing to export yet — start a conversation first!');return;}
+  const date=new Date().toLocaleDateString([],{year:'numeric',month:'long',day:'numeric'});
+  const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  let txt=`AXIOM — Conversation Export\nDate: ${date} at ${time}\nMode: ${mode.toUpperCase()}\nMessages: ${exportLog.length}\n${'═'.repeat(60)}\n\n`;
+  exportLog.forEach(m=>{
+    const who=m.role==='ai'?'AXIOM':'YOU';
+    const voice=m.isVoice?' [voice]':'';
+    const topics=m.topics?.length?' ['+m.topics.join(', ')+']':'';
+    txt+=`[${m.time}] ${who}${voice}${topics}\n${m.content}\n\n${'─'.repeat(60)}\n\n`;
+  });
+  txt+=`End of conversation — AXIOM v1.3`;
+  const blob=new Blob([txt],{type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`axiom-conversation-${Date.now()}.txt`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function exportPDF(){
+  if(!exportLog.length){alert('Nothing to export yet — start a conversation first!');return;}
+  const date=new Date().toLocaleDateString([],{year:'numeric',month:'long',day:'numeric'});
+  const rows=exportLog.map(m=>{
+    const who=m.role==='ai'?'<span style="color:#00e5ff;font-weight:700">AXIOM</span>':'<span style="color:#a78bfa;font-weight:700">YOU</span>';
+    const voice=m.isVoice?' <span style="font-size:10px;opacity:0.6">[voice]</span>':'';
+    const topics=m.topics?.length?`<span style="font-size:10px;opacity:0.6"> [${m.topics.join(', ')}]</span>`:'';
+    const content=m.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    return `<div style="margin-bottom:20px;padding:16px;border-radius:8px;background:${m.role==='ai'?'#0d0d16':'#1a1a2e'};border:1px solid #2a2a3e">
+      <div style="font-size:11px;color:#888;margin-bottom:8px">${m.time} — ${who}${voice}${topics}</div>
+      <div style="font-size:13px;line-height:1.7;color:#e0e0e0">${content}</div>
+    </div>`;
+  }).join('');
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>AXIOM Conversation — ${date}</title>
+  <style>body{margin:0;padding:40px;background:#06060a;font-family:'Courier New',monospace;color:#e0e0e0}
+  h1{color:#00e5ff;font-size:22px;margin-bottom:4px}
+  .meta{color:#888;font-size:12px;margin-bottom:32px;border-bottom:1px solid #2a2a3e;padding-bottom:16px}
+  .footer{margin-top:32px;text-align:center;color:#444;font-size:11px;border-top:1px solid #2a2a3e;padding-top:16px}
+  @media print{body{background:#fff;color:#000}h1{color:#0066cc}.footer{color:#666}}</style></head>
+  <body><h1>◈ AXIOM — Conversation Export</h1>
+  <div class="meta">Date: ${date} &nbsp;·&nbsp; Mode: ${mode.toUpperCase()} &nbsp;·&nbsp; Messages: ${exportLog.length}</div>
+  ${rows}<div class="footer">Exported from AXIOM — Adaptive eXchange Intelligence & Omni-context Machine</div>
+  </body></html>`;
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`axiom-conversation-${Date.now()}.html`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ════════════════════════════════════════════
 //  CLEAR
 // ════════════════════════════════════════════
 function clearChat(){
   stopSpeaking(); cancelListening();
-  history=[]; topicMap={}; msgCount=0; voiceCount=0; spokenCount=0;
+  history=[]; exportLog=[]; topicMap={}; msgCount=0; voiceCount=0; spokenCount=0;
   ['msg-count','voice-count','spoken-count','topic-count'].forEach(id=>document.getElementById(id).textContent='0');
   document.getElementById('topic-list').innerHTML='<div class="empty-state">Topics emerge as you talk.</div>';
   ['depth','curiosity','complexity'].forEach(k=>{document.getElementById(k+'-bar').style.width='0%';document.getElementById(k+'-val').textContent='—'});
