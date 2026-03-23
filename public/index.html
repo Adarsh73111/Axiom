@@ -314,6 +314,13 @@
           </div>
         </div>
       </div>
+      <div class="sidebar-section" id="summary-section" style="display:none">
+        <div class="sidebar-title">Conversation Summary</div>
+        <div id="summary-box" style="font-size:12px;line-height:1.7;color:var(--text2);background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-family:var(--font-mono)">
+          <span class="empty-state">Summary will appear after a few exchanges.</span>
+        </div>
+        <button onclick="generateSummary(true)" style="margin-top:8px;width:100%;background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px;border-radius:6px;font-family:var(--font-mono);font-size:10px;cursor:pointer;letter-spacing:1px">↺ REFRESH SUMMARY</button>
+      </div>
       <div class="sidebar-section">
         <div class="sidebar-title">Context Threads</div>
         <div class="topic-list" id="topic-list"><div class="empty-state">Topics emerge as you talk.</div></div>
@@ -429,177 +436,39 @@ if('speechSynthesis' in window){
   setTimeout(initVoices,500);
 }
 function setVoice(name){ selectedVoice=name||null; }
-function previewVoice(){
-  const utt=new SpeechSynthesisUtterance('Hello, I am AXIOM. This is how I sound.');
-  const voices=speechSynthesis.getVoices();
-  if(selectedVoice){ const v=voices.find(v=>v.name===selectedVoice); if(v) utt.voice=v; }
-  speechSynthesis.cancel();
-  speechSynthesis.speak(utt);
-}
 
-async function checkHealth(){
+// ════════════════════════════════════════════
+//  CONVERSATION SUMMARY
+// ════════════════════════════════════════════
+let summaryGenerating=false;
+async function generateSummary(manual=false){
+  if(summaryGenerating||history.length<4) return;
+  summaryGenerating=true;
+  const box=document.getElementById('summary-box');
+  const section=document.getElementById('summary-section');
+  if(!box||!section) return;
+  section.style.display='block';
+  box.innerHTML='<span style="color:var(--accent);font-size:11px">◈ Generating summary…</span>';
   try{
-    const r=await fetch('/health'), d=await r.json();
-    const dot=document.getElementById('status-dot'), txt=document.getElementById('status-text');
-    if(d.api_key_configured){dot.className='status-dot';txt.textContent='Online';document.getElementById('setup-banner').classList.remove('visible')}
-    else{dot.className='status-dot offline';txt.textContent='Key missing';document.getElementById('setup-banner').classList.add('visible')}
-  }catch{document.getElementById('status-dot').className='status-dot offline';document.getElementById('status-text').textContent='Server offline'}
-}
-
-// ════════════════════════════════════════════
-//  VOICE REPLY TOGGLE
-// ════════════════════════════════════════════
-function toggleVoiceReply(){
-  voiceReplyOn=!voiceReplyOn;
-  document.getElementById('voice-toggle').classList.toggle('active',voiceReplyOn);
-  if(!voiceReplyOn) stopSpeaking();
-}
-
-// ════════════════════════════════════════════
-//  SPEECH RECOGNITION
-// ════════════════════════════════════════════
-function toggleListening(){if(isListening){cancelListening();return}startListening()}
-
-function startListening(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR)return;
-  stopSpeaking();
-  recognition=new SR();
-  recognition.continuous=true; recognition.interimResults=true; recognition.lang='en-US';
-
-  recognition.onstart=()=>{
-    isListening=true; capturedText='';
-    document.getElementById('overlay').classList.add('visible');
-    document.getElementById('mic-btn').classList.add('active');
-    document.getElementById('orb-inner').classList.add('listening');
-    document.getElementById('listen-label').innerHTML='<span>Listening…</span> speak now';
-    document.getElementById('transcript').innerHTML='<span class="placeholder">Your words will appear here as you speak…</span>';
-    
-    startFakeWave(); startMicAnalyzer();
-  };
-
-  recognition.onresult=(e)=>{
-    let fin='', int='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const t=e.results[i][0].transcript;
-      if(e.results[i].isFinal) fin+=t; else int+=t;
-    }
-    if(fin) capturedText+=fin;
-    const full=capturedText+int;
-    const el=document.getElementById('transcript');
-    if(full){el.textContent=full;el.classList.add('has-text')}
-    
-  };
-
-  recognition.onerror=(e)=>{if(e.error==='not-allowed') alert('Microphone access denied. Please allow it in browser settings.');cancelListening()};
-  recognition.onend=()=>{if(isListening && capturedText.trim()) sendVoiceMessage(); else if(isListening) cancelListening()};
-  recognition.start();
-}
-
-function cancelListening(){
-  isListening=false;
-  if(recognition){recognition.abort();recognition=null}
-  stopFakeWave(); stopMicAnalyzer();
-  document.getElementById('overlay').classList.remove('visible');
-  document.getElementById('mic-btn').classList.remove('active');
-  document.getElementById('orb-inner').classList.remove('listening','processing');
-}
-
-function sendVoiceMessage(){
-  const text=capturedText.trim()||document.getElementById('transcript').textContent.trim();
-  if(!text||text.startsWith('Your words')) return;
-  if(recognition){recognition.stop();recognition=null}
-  isListening=false; stopFakeWave(); stopMicAnalyzer();
-  document.getElementById('orb-inner').classList.remove('listening');
-  document.getElementById('orb-inner').classList.add('processing');
-  document.getElementById('listen-label').innerHTML='<span>Processing…</span>';
-  setTimeout(()=>{
-    document.getElementById('overlay').classList.remove('visible');
-    document.getElementById('mic-btn').classList.remove('active');
-    document.getElementById('orb-inner').classList.remove('processing');
-    document.getElementById('chat-input').value=text;
-    sendMessage(true);
-  },50);
-}
-
-// ════════════════════════════════════════════
-//  WAVEFORM
-// ════════════════════════════════════════════
-function startFakeWave(){
-  if(waveInt) return;
-  waveInt=setInterval(()=>{
-    if(analyser) return;
-    for(let i=0;i<12;i++){const b=document.getElementById('b'+i);if(b)b.style.height=(5+Math.random()*36)+'px'}
-  },110);
-}
-function stopFakeWave(){if(waveInt){clearInterval(waveInt);waveInt=null}for(let i=0;i<12;i++){const b=document.getElementById('b'+i);if(b)b.style.height='5px'}}
-
-async function startMicAnalyzer(){
-  try{
-    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
-    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    analyser=audioCtx.createAnalyser(); analyser.fftSize=32;
-    audioCtx.createMediaStreamSource(micStream).connect(analyser);
-    (function draw(){
-      animId=requestAnimationFrame(draw);
-      const buf=new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteFrequencyData(buf);
-      for(let i=0;i<12;i++){
-        const b=document.getElementById('b'+i);if(!b)continue;
-        const v=buf[Math.floor(i*buf.length/12)]||0;
-        b.style.height=Math.max(5,Math.round(v/255*44))+'px';
-        b.style.opacity=0.4+v/255*0.6;
-      }
-    })();
-  }catch{}
-}
-function stopMicAnalyzer(){
-  if(animId){cancelAnimationFrame(animId);animId=null}
-  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}
-  if(audioCtx){audioCtx.close();audioCtx=null}
-  analyser=null;
-}
-
-// ════════════════════════════════════════════
-//  TEXT TO SPEECH
-// ════════════════════════════════════════════
-function speak(text){
-  if(!voiceReplyOn||!('speechSynthesis' in window)) return;
-  stopSpeaking();
-  const clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').replace(/`{1,3}[^`]*`{1,3}/g,'').replace(/#{1,6}\s/g,'').replace(/\n+/g,' ').trim();
-  const utt=new SpeechSynthesisUtterance(clean);
-  utt.rate=1.0; utt.pitch=1.0; utt.volume=1.0;
-  const voices=speechSynthesis.getVoices();
-  if(selectedVoice){
-    const pick=voices.find(v=>v.name===selectedVoice);
-    if(pick) utt.voice=pick;
-  } else {
-    const pick=voices.find(v=>v.name.includes('Samantha')||v.name.includes('Daniel')||v.name.includes('Google UK English Female')||v.name.includes('Google US English')||(v.lang==='en-US'&&!v.name.toLowerCase().includes('compact')))||voices.find(v=>v.lang.startsWith('en'));
-    if(pick) utt.voice=pick;
+    const res=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        messages:[...history,{role:'user',content:'In 3-4 sentences, summarize the key themes, insights, and direction of our conversation so far. Be concise and specific. No bullet points.'}],
+        systemPrompt:'You are a concise summarizer. Summarize conversations in 3-4 clear sentences. Focus on key ideas discussed.',
+        mode:'analyze'
+      })
+    });
+    const data=await res.json();
+    const summary=data.reply||'Could not generate summary.';
+    box.innerHTML=`<span style="color:var(--text2)">${summary}</span><div style="margin-top:8px;font-size:9px;color:var(--text3);letter-spacing:1px">UPDATED ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+  }catch(e){
+    box.innerHTML='<span style="color:var(--text3)">Summary unavailable.</span>';
   }
-  utt.onstart=()=>{
-    document.getElementById('speaking-overlay').classList.add('visible');
-    spokenCount++; document.getElementById('spoken-count').textContent=spokenCount;
-    document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
-    const avs=document.querySelectorAll('.avatar.ai');
-    if(avs.length) avs[avs.length-1].classList.add('speaking-avatar');
-  };
-  const done=()=>{
-    document.getElementById('speaking-overlay').classList.remove('visible');
-    document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
-  };
-  utt.onend=done; utt.onerror=done;
-  speechSynthesis.speak(utt);
-}
-function stopSpeaking(){
-  if('speechSynthesis' in window) speechSynthesis.cancel();
-  document.getElementById('speaking-overlay').classList.remove('visible');
-  document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
+  summaryGenerating=false;
 }
 
-// ════════════════════════════════════════════
-//  MODE
-// ════════════════════════════════════════════
+
 function setMode(btn){
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active'); mode=btn.dataset.mode;
@@ -637,6 +506,7 @@ function updateSidebar(uText,aText){
   const entries=Object.entries(topicMap).sort((a,b)=>b[1].count-a[1].count).slice(0,6);
   list.innerHTML=entries.length?entries.map(([t,d])=>`<div class="topic-item"><div class="topic-dot" style="background:${d.color};box-shadow:0 0 6px ${d.color}55"></div><div class="topic-text">${t}</div><div class="topic-count">×${d.count}</div></div>`).join(''):'<div class="empty-state">Topics emerge as you talk.</div>';
   document.getElementById('topic-count').textContent=Object.keys(topicMap).length;
+  if(history.length>=4 && history.length%6===0) generateSummary();
   const n=history.length;
   const avgLen=history.reduce((s,m)=>s+m.content.length,0)/Math.max(n,1);
   const qc=history.filter(m=>m.role==='user'&&m.content.includes('?')).length;
@@ -806,7 +676,9 @@ function exportPDF(){
 // ════════════════════════════════════════════
 function clearChat(){
   stopSpeaking(); cancelListening();
-  history=[]; exportLog=[]; topicMap={}; msgCount=0; voiceCount=0; spokenCount=0;
+  history=[]; exportLog=[]; topicMap={};
+  const sb=document.getElementById('summary-box'); if(sb) sb.innerHTML='<span class="empty-state">Summary will appear after a few exchanges.</span>';
+  const ss=document.getElementById('summary-section'); if(ss) ss.style.display='none'; msgCount=0; voiceCount=0; spokenCount=0;
   ['msg-count','voice-count','spoken-count','topic-count'].forEach(id=>document.getElementById(id).textContent='0');
   document.getElementById('topic-list').innerHTML='<div class="empty-state">Topics emerge as you talk.</div>';
   ['depth','curiosity','complexity'].forEach(k=>{document.getElementById(k+'-bar').style.width='0%';document.getElementById(k+'-val').textContent='—'});
