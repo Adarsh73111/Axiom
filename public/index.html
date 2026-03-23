@@ -358,7 +358,6 @@
   <div class="live-transcript" id="transcript"><span class="placeholder">Your words will appear here as you speak…</span></div>
   <div class="overlay-actions">
     <button class="overlay-btn cancel" onclick="cancelListening()">Cancel</button>
-    <button class="overlay-btn send-voice" id="send-voice-btn" onclick="sendVoiceMessage()" disabled>Send →</button>
   </div>
 </div>
 
@@ -442,7 +441,7 @@ function startListening(){
     document.getElementById('orb-inner').classList.add('listening');
     document.getElementById('listen-label').innerHTML='<span>Listening…</span> speak now';
     document.getElementById('transcript').innerHTML='<span class="placeholder">Your words will appear here as you speak…</span>';
-    document.getElementById('send-voice-btn').disabled=true;
+    
     startFakeWave(); startMicAnalyzer();
   };
 
@@ -456,7 +455,7 @@ function startListening(){
     const full=capturedText+int;
     const el=document.getElementById('transcript');
     if(full){el.textContent=full;el.classList.add('has-text')}
-    document.getElementById('send-voice-btn').disabled=full.trim().length===0;
+    
   };
 
   recognition.onerror=(e)=>{if(e.error==='not-allowed') alert('Microphone access denied. Please allow it in browser settings.');cancelListening()};
