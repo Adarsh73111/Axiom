@@ -513,8 +513,7 @@ function rebuildMessages(t){
     div.className='message '+(m.role==='user'?'user':'ai');
     const time='';
     if(m.role==='user'){
-      div.innerHTML=`<div class="avatar user">U</div><div class="bubble-wrap"><div class="bubble">${m.content.replace(/
-/g,'<br>')}</div><div class="meta">${time}</div></div>`;
+      div.innerHTML=`<div class="avatar user">U</div><div class="bubble-wrap"><div class="bubble">${m.content.replace(/\n/g,'<br>')}</div><div class="meta">${time}</div></div>`;
     } else {
       const safeContent=JSON.stringify(m.content);
       const replay=`<button class="replay-btn" onclick="speak(${safeContent})"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>Read aloud</button>`;
