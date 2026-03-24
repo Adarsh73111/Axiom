@@ -219,6 +219,10 @@
     <button class="mode-btn" data-mode="reflect" onclick="setMode(this)">Reflect</button>
   </div>
   <div class="header-right">
+    <div id="wake-dot" style="display:none;align-items:center;gap:6px;padding:5px 12px;border-radius:100px;border:1px solid var(--accent);background:rgba(0,229,255,0.08)">
+      <div style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.5s infinite"></div>
+      <span style="font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:1px">LISTENING FOR AXIOM</span>
+    </div>
     <div class="status-pill">
       <div class="status-dot" id="status-dot"></div>
       <span id="status-text">Connecting…</span>
@@ -303,6 +307,7 @@
               <button onclick="selectedVoice=null;document.getElementById('voice-picker').value=''" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px;border-radius:6px;font-family:var(--font-mono);font-size:10px;cursor:pointer;letter-spacing:1px">↺ AUTO</button>
             </div>
           </div>
+        <button id="wake-btn" onclick="toggleWakeWord()" style="width:100%;margin-bottom:12px;background:transparent;border:1px solid var(--border);color:var(--text2);padding:8px;border-radius:8px;font-family:var(--font-mono);font-size:11px;cursor:pointer;letter-spacing:1px;transition:all 0.2s">◎ HEY AXIOM</button>
         <div class="voice-stats">
           <div class="voice-stat">
             <div class="vstat-icon">🎙</div>
@@ -619,6 +624,220 @@ async function sendMessage(fromVoice=false){
   document.getElementById('chat-input').focus();
 }
 function sendStarter(text){document.getElementById('chat-input').value=text;sendMessage()}
+
+// ════════════════════════════════════════════
+//  HEALTH CHECK
+// ════════════════════════════════════════════
+async function checkHealth(){
+  try{
+    const r=await fetch('/health'); const d=await r.json();
+    const dot=document.getElementById('status-dot'), txt=document.getElementById('status-text');
+    if(d.api_key_configured){dot.style.background='var(--green)';txt.textContent='Online';}
+    else{dot.style.background='var(--accent2)';txt.textContent='No API Key';document.getElementById('setup-banner').classList.add('visible');}
+  }catch(e){
+    document.getElementById('status-dot').style.background='#ef4444';
+    document.getElementById('status-text').textContent='Offline';
+  }
+}
+
+// ════════════════════════════════════════════
+//  VOICE TOGGLE
+// ════════════════════════════════════════════
+function toggleVoiceReply(){
+  voiceReplyOn=!voiceReplyOn;
+  const btn=document.getElementById('voice-toggle');
+  btn.classList.toggle('active',voiceReplyOn);
+}
+
+// ════════════════════════════════════════════
+//  WAVEFORM
+// ════════════════════════════════════════════
+function startFakeWave(){
+  if(waveInt) return;
+  waveInt=setInterval(()=>{
+    if(analyser) return;
+    for(let i=0;i<12;i++){const b=document.getElementById('b'+i);if(b)b.style.height=(5+Math.random()*36)+'px'}
+  },80);
+}
+function stopFakeWave(){
+  clearInterval(waveInt); waveInt=null;
+  for(let i=0;i<12;i++){const b=document.getElementById('b'+i);if(b)b.style.height='4px'}
+}
+async function startMicAnalyzer(){
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx=new AudioContext();
+    analyser=audioCtx.createAnalyser(); analyser.fftSize=32;
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    (function draw(){
+      animId=requestAnimationFrame(draw);
+      const buf=new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(buf);
+      for(let i=0;i<12;i++){
+        const b=document.getElementById('b'+i);if(!b)continue;
+        const v=buf[Math.floor(i*buf.length/12)]||0;
+        b.style.height=Math.max(5,Math.round(v/255*44))+'px';
+        b.style.opacity=0.4+v/255*0.6;
+      }
+    })();
+  }catch{}
+}
+function stopMicAnalyzer(){
+  if(animId){cancelAnimationFrame(animId);animId=null}
+  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}
+  if(audioCtx){audioCtx.close();audioCtx=null}
+  analyser=null;
+}
+
+// ════════════════════════════════════════════
+//  TEXT TO SPEECH
+// ════════════════════════════════════════════
+function speak(text){
+  if(!voiceReplyOn||!('speechSynthesis' in window)) return;
+  stopSpeaking();
+  const clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').replace(/`{1,3}[^`]*`{1,3}/g,'').replace(/#{1,6}\s/g,'').replace(/
++/g,' ').trim();
+  const utt=new SpeechSynthesisUtterance(clean);
+  utt.rate=1.0; utt.pitch=1.0; utt.volume=1.0;
+  const voices=speechSynthesis.getVoices();
+  if(selectedVoice){
+    const pick=voices.find(v=>v.name===selectedVoice);
+    if(pick) utt.voice=pick;
+  } else {
+    const pick=voices.find(v=>v.name.includes('Samantha')||v.name.includes('Daniel')||v.name.includes('Google UK English Female')||v.name.includes('Google US English')||(v.lang==='en-US'&&!v.name.toLowerCase().includes('compact')))||voices.find(v=>v.lang.startsWith('en'));
+    if(pick) utt.voice=pick;
+  }
+  utt.onstart=()=>{
+    document.getElementById('speaking-overlay').classList.add('visible');
+    spokenCount++; document.getElementById('spoken-count').textContent=spokenCount;
+    document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
+    const avs=document.querySelectorAll('.avatar.ai');
+    if(avs.length) avs[avs.length-1].classList.add('speaking-avatar');
+  };
+  const done=()=>{
+    document.getElementById('speaking-overlay').classList.remove('visible');
+    document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
+  };
+  utt.onend=done; utt.onerror=done;
+  speechSynthesis.speak(utt);
+}
+function stopSpeaking(){
+  if('speechSynthesis' in window) speechSynthesis.cancel();
+  document.getElementById('speaking-overlay').classList.remove('visible');
+  document.querySelectorAll('.avatar.ai').forEach(a=>a.classList.remove('speaking-avatar'));
+}
+function previewVoice(){
+  const utt=new SpeechSynthesisUtterance('Hello, I am AXIOM. This is how I sound.');
+  const voices=speechSynthesis.getVoices();
+  if(selectedVoice){ const v=voices.find(v=>v.name===selectedVoice); if(v) utt.voice=v; }
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utt);
+}
+
+// ════════════════════════════════════════════
+//  VOICE INPUT
+// ════════════════════════════════════════════
+function toggleListening(){
+  if(isListening){cancelListening();return;}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR) return;
+  recognition=new SR();
+  recognition.continuous=true; recognition.interimResults=true; recognition.lang='en-US';
+  recognition.onstart=()=>{
+    isListening=true; capturedText='';
+    document.getElementById('overlay').classList.add('visible');
+    document.getElementById('mic-btn').classList.add('active');
+    document.getElementById('orb-inner').classList.add('listening');
+    document.getElementById('listen-label').innerHTML='<span>Listening…</span> speak now';
+    document.getElementById('transcript').innerHTML='<span class="placeholder">Your words will appear here as you speak…</span>';
+    startFakeWave(); startMicAnalyzer();
+  };
+  recognition.onresult=(e)=>{
+    let int='', fin='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal) fin+=e.results[i][0].transcript;
+      else int+=e.results[i][0].transcript;
+    }
+    if(fin) capturedText+=fin;
+    const full=capturedText+int;
+    document.getElementById('transcript').textContent=full||'';
+  };
+  recognition.onerror=(e)=>{if(e.error==='not-allowed') alert('Microphone access denied.');cancelListening()};
+  recognition.onend=()=>{if(isListening && capturedText.trim()) sendVoiceMessage(); else if(isListening) cancelListening()};
+  recognition.start();
+}
+function cancelListening(){
+  isListening=false;
+  if(recognition){recognition.abort();recognition=null}
+  stopFakeWave(); stopMicAnalyzer();
+  document.getElementById('overlay').classList.remove('visible');
+  document.getElementById('mic-btn').classList.remove('active');
+  document.getElementById('orb-inner').classList.remove('listening','processing');
+}
+function sendVoiceMessage(){
+  const text=capturedText.trim()||document.getElementById('transcript').textContent.trim();
+  if(!text||text.startsWith('Your words')) return;
+  if(recognition){recognition.stop();recognition=null}
+  isListening=false; stopFakeWave(); stopMicAnalyzer();
+  document.getElementById('orb-inner').classList.remove('listening');
+  document.getElementById('orb-inner').classList.add('processing');
+  document.getElementById('listen-label').innerHTML='<span>Processing…</span>';
+  setTimeout(()=>{
+    document.getElementById('overlay').classList.remove('visible');
+    document.getElementById('mic-btn').classList.remove('active');
+    document.getElementById('orb-inner').classList.remove('processing');
+    document.getElementById('chat-input').value=text;
+    sendMessage(true);
+  },50);
+}
+
+// ════════════════════════════════════════════
+//  WAKE WORD — HEY AXIOM
+// ════════════════════════════════════════════
+let wakeRecognition=null, wakeWordOn=false;
+
+function toggleWakeWord(){
+  if(wakeWordOn){ stopWakeWord(); return; }
+  startWakeWord();
+}
+
+function startWakeWord(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ alert('Wake word not supported in this browser. Use Chrome or Edge.'); return; }
+  wakeWordOn=true;
+  const btn=document.getElementById('wake-btn');
+  if(btn){ btn.classList.add('active'); btn.textContent='◉ HEY AXIOM ON'; }
+  document.getElementById('wake-dot').style.display='flex';
+  listenForWake();
+}
+
+function stopWakeWord(){
+  wakeWordOn=false;
+  if(wakeRecognition){ wakeRecognition.abort(); wakeRecognition=null; }
+  const btn=document.getElementById('wake-btn');
+  if(btn){ btn.classList.remove('active'); btn.textContent='◎ HEY AXIOM'; }
+  document.getElementById('wake-dot').style.display='none';
+}
+
+function listenForWake(){
+  if(!wakeWordOn) return;
+  if(isListening) { setTimeout(listenForWake, 1000); return; }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  wakeRecognition=new SR();
+  wakeRecognition.continuous=false;
+  wakeRecognition.interimResults=false;
+  wakeRecognition.lang='en-US';
+  wakeRecognition.onresult=(e)=>{
+    const said=(e.results[0][0].transcript||'').toLowerCase().trim();
+    if(said.includes('axiom')||said.includes('hey axiom')||said.includes('hi axiom')){
+      wakeRecognition=null;
+      setTimeout(()=>{ toggleListening(); }, 200);
+    }
+  };
+  wakeRecognition.onend=()=>{ if(wakeWordOn && !isListening) setTimeout(listenForWake, 300); };
+  wakeRecognition.onerror=()=>{ if(wakeWordOn) setTimeout(listenForWake, 1000); };
+  try{ wakeRecognition.start(); }catch(e){ setTimeout(listenForWake,500); }
+}
 
 // ════════════════════════════════════════════
 //  EXPORT
