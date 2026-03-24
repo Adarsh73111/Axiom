@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#00e5ff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AXIOM">
+<link rel="manifest" href="/manifest.json">
 <title>AXIOM — Contextual Voice AI</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;1,300&family=Playfair+Display:ital@1&display=swap" rel="stylesheet">
 <style>
@@ -231,6 +237,8 @@
       <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
       Voice Reply
     </button>
+    <button id="install-btn" onclick="installPWA()" style="display:none;align-items:center;gap:6px;background:transparent;border:1px solid var(--accent);color:var(--accent);padding:6px 12px;border-radius:100px;font-family:var(--font-mono);font-size:11px;cursor:pointer;letter-spacing:1px">⬇ INSTALL APP</button>
+    <span id="lang-indicator" style="display:none;font-family:var(--font-mono);font-size:11px;color:var(--accent2);padding:4px 10px;border-radius:100px;border:1px solid var(--accent2);background:rgba(251,191,36,0.08)"></span>
     <button class="clear-btn" onclick="exportTXT()" title="Download as text file" style="background:transparent;border:1px solid var(--accent);color:var(--accent);margin-right:6px">Export TXT</button>
     <button class="clear-btn" onclick="exportPDF()" title="Download as HTML/PDF" style="background:transparent;border:1px solid #a78bfa;color:#a78bfa;margin-right:6px">Export PDF</button>
     <button class="clear-btn" onclick="clearChat()">Clear</button>
@@ -586,7 +594,9 @@ async function sendMessage(fromVoice=false){
   history.push({role:'user',content:text});
   showTyping();
   try{
-    const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history,systemPrompt:MODES[mode].sys,mode})});
+    detectedLang=detectLanguage(text); updateLangIndicator(detectedLang);
+    const langSys=getLangSystemPrompt(MODES[mode].sys, detectedLang);
+    const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history,systemPrompt:langSys,mode})});
     if(!res.ok){const d=await res.json();throw new Error(d.error||'Server error');}
     removeTyping();
     const {bubbleEl,msgEl}=addStreamingMsg(uTopics);
@@ -907,6 +917,63 @@ function clearChat(){
 // ════════════════════════════════════════════
 //  INPUT EVENTS
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+//  PWA — SERVICE WORKER + INSTALL PROMPT
+// ════════════════════════════════════════════
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault(); deferredPrompt=e;
+  document.getElementById('install-btn').style.display='flex';
+});
+window.addEventListener('appinstalled',()=>{
+  document.getElementById('install-btn').style.display='none';
+  deferredPrompt=null;
+});
+function installPWA(){
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(()=>{ deferredPrompt=null; document.getElementById('install-btn').style.display='none'; });
+}
+
+// ════════════════════════════════════════════
+//  MULTI-LANGUAGE SUPPORT
+// ════════════════════════════════════════════
+let detectedLang='en', langLocked=false;
+const LANG_NAMES={'en':'English','hi':'Hindi','es':'Spanish','fr':'French','de':'German','ja':'Japanese','zh':'Chinese','ar':'Arabic','pt':'Portuguese','ru':'Russian','it':'Italian','ko':'Korean'};
+function detectLanguage(text){
+  const hindiRe=/[ऀ-ॿ]/;
+  const arabicRe=/[؀-ۿ]/;
+  const chineseRe=/[一-鿿]/;
+  const japaneseRe=/[぀-ゟ゠-ヿ]/;
+  const koreanRe=/[가-힯]/;
+  const cyrillicRe=/[Ѐ-ӿ]/;
+  if(hindiRe.test(text)) return 'hi';
+  if(arabicRe.test(text)) return 'ar';
+  if(chineseRe.test(text)) return 'zh';
+  if(japaneseRe.test(text)) return 'ja';
+  if(koreanRe.test(text)) return 'ko';
+  if(cyrillicRe.test(text)) return 'ru';
+  return 'en';
+}
+function getLangSystemPrompt(baseSys, lang){
+  if(lang==='en') return baseSys;
+  const langName=LANG_NAMES[lang]||lang;
+  return baseSys+` IMPORTANT: The user is writing in ${langName}. You MUST respond entirely in ${langName}. Do not switch to English.`;
+}
+function updateLangIndicator(lang){
+  const el=document.getElementById('lang-indicator');
+  if(!el) return;
+  if(lang && lang!=='en'){
+    el.textContent='🌐 '+( LANG_NAMES[lang]||lang);
+    el.style.display='inline-block';
+  } else {
+    el.style.display='none';
+  }
+}
+
 const ta=document.getElementById('chat-input');
 ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}});
 ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,140)+'px'});
