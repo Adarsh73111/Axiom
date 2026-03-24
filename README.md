@@ -231,8 +231,6 @@ MIT — free to use, modify, and distribute.
 
 **Built by [Adarsh Misra](https://github.com/Adarsh73111)**
 
-*Developed with AI-assisted pair programming using Claude (Anthropic)*
-
 ◈ AXIOM — Because every conversation deserves a foundation.
 
 </div>
