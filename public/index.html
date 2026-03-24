@@ -167,6 +167,19 @@
 
   /* SIDEBAR */
   .sidebar{width:260px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;background:var(--surface)}
+  .threads-panel{padding:14px 16px;border-bottom:2px solid var(--accent);background:var(--surface2)}
+  .threads-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .threads-title{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--accent);font-family:var(--font-display)}
+  .new-thread-btn{background:transparent;border:1px solid var(--accent);color:var(--accent);padding:4px 10px;border-radius:100px;font-family:var(--font-mono);font-size:10px;cursor:pointer;letter-spacing:1px}
+  .threads-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;scrollbar-width:none}
+  .thread-item{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;font-family:var(--font-mono);font-size:11px;color:var(--text2)}
+  .thread-item:hover{background:var(--surface3);border-color:var(--border)}
+  .thread-item.active{background:rgba(0,229,255,0.08);border-color:var(--accent);color:var(--accent)}
+  .thread-dot{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0}
+  .thread-item.active .thread-dot{background:var(--accent)}
+  .thread-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-del{background:transparent;border:none;color:var(--text3);cursor:pointer;padding:2px 4px;border-radius:4px;font-size:12px;opacity:0;transition:opacity 0.15s}
+  .thread-item:hover .thread-del{opacity:1}
   .sidebar-scroll{flex:1;overflow-y:auto;scrollbar-width:none}
   .sidebar-scroll::-webkit-scrollbar{display:none}
   .sidebar-section{padding:20px;border-bottom:1px solid var(--border)}
@@ -295,6 +308,13 @@
   </div>
 
   <div class="sidebar">
+    <div class="threads-panel">
+      <div class="threads-header">
+        <span class="threads-title">◈ Conversations</span>
+        <button class="new-thread-btn" onclick="newThread()">+ New</button>
+      </div>
+      <div class="threads-list" id="threads-list"></div>
+    </div>
     <div class="sidebar-scroll">
       <div class="sidebar-section">
         <div class="sidebar-title">Current Mode</div>
@@ -408,6 +428,10 @@
 //  STATE
 // ════════════════════════════════════════════
 let history=[], exportLog=[], isLoading=false, mode='explore', topicMap={}, msgCount=0, voiceCount=0, spokenCount=0;
+let threads=[], activeThreadId=null;
+function makeThread(name){
+  return {id:Date.now()+'_'+Math.random().toString(36).slice(2), name:name||'New Conversation', history:[], exportLog:[], topicMap:{}, msgCount:0, voiceCount:0, spokenCount:0, summary:null, createdAt:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})};
+}
 let voiceReplyOn=true, recognition=null, isListening=false, capturedText='', selectedVoice=null;
 let audioCtx=null, analyser=null, micStream=null, animId=null, waveInt=null;
 
@@ -430,6 +454,7 @@ const TOPIC_COLORS=['var(--accent)','var(--accent2)','var(--accent3)','var(--gre
 //  INIT
 // ════════════════════════════════════════════
 checkHealth();
+initThreads();
 if(!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)){
   document.getElementById('mic-btn').disabled=true;
   document.getElementById('browser-warn').classList.add('visible');
@@ -449,6 +474,103 @@ if('speechSynthesis' in window){
   setTimeout(initVoices,500);
 }
 function setVoice(name){ selectedVoice=name||null; }
+
+// ════════════════════════════════════════════
+//  CONVERSATION THREADS
+// ════════════════════════════════════════════
+function saveCurrentThread(){
+  if(!activeThreadId) return;
+  const t=threads.find(t=>t.id===activeThreadId);
+  if(!t) return;
+  t.history=[...history]; t.exportLog=[...exportLog]; t.topicMap={...topicMap};
+  t.msgCount=msgCount; t.voiceCount=voiceCount; t.spokenCount=spokenCount;
+  const sb=document.getElementById('summary-box');
+  if(sb) t.summary=sb.innerHTML;
+}
+function loadThread(t){
+  history=[...t.history]; exportLog=[...t.exportLog]; topicMap={...t.topicMap};
+  msgCount=t.msgCount; voiceCount=t.voiceCount; spokenCount=t.spokenCount;
+  ['msg-count','voice-count','spoken-count'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.textContent=id==='msg-count'?msgCount:id==='voice-count'?voiceCount:spokenCount;
+  });
+  const sb=document.getElementById('summary-box');
+  const ss=document.getElementById('summary-section');
+  if(sb && t.summary){ sb.innerHTML=t.summary; if(ss) ss.style.display='block'; }
+  else if(sb){ sb.innerHTML='<span class="empty-state">Summary will appear after a few exchanges.</span>'; if(ss) ss.style.display='none'; }
+  rebuildMessages(t);
+  updateSidebar('','');
+}
+function rebuildMessages(t){
+  const c=document.getElementById('messages');
+  if(!t.history.length){
+    c.innerHTML=`<div class="welcome" id="welcome"><div class="welcome-icon">◈</div><h1>Hello, I'm AXIOM</h1><p>Speak to me or type — I hold the full context of everything we've said, and I'll reply out loud.</p></div>`;
+    return;
+  }
+  c.innerHTML='';
+  t.history.forEach(m=>{
+    const div=document.createElement('div');
+    div.className='message '+(m.role==='user'?'user':'ai');
+    const time='';
+    if(m.role==='user'){
+      div.innerHTML=`<div class="avatar user">U</div><div class="bubble-wrap"><div class="bubble">${m.content.replace(/
+/g,'<br>')}</div><div class="meta">${time}</div></div>`;
+    } else {
+      const safeContent=JSON.stringify(m.content);
+      const replay=`<button class="replay-btn" onclick="speak(${safeContent})"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>Read aloud</button>`;
+      div.innerHTML=`<div class="avatar ai">AX</div><div class="bubble-wrap"><div class="bubble">${fmt(m.content)}</div><div class="meta">${time}${replay}</div></div>`;
+    }
+    c.appendChild(div);
+  });
+  c.scrollTop=c.scrollHeight;
+}
+function renderThreadsList(){
+  const list=document.getElementById('threads-list');
+  if(!list) return;
+  list.innerHTML=threads.map(t=>`
+    <div class="thread-item${t.id===activeThreadId?' active':''}" onclick="switchThread('${t.id}')">
+      <div class="thread-dot"></div>
+      <span class="thread-name" title="${t.name}">${t.name}</span>
+      <span class="thread-del" onclick="event.stopPropagation();deleteThread('${t.id}')" title="Delete">✕</span>
+    </div>`).join('');
+}
+function newThread(){
+  saveCurrentThread();
+  const t=makeThread('Conversation '+(threads.length+1));
+  threads.push(t);
+  activeThreadId=t.id;
+  history=[]; exportLog=[]; topicMap={};
+  msgCount=0; voiceCount=0; spokenCount=0;
+  ['msg-count','voice-count','spoken-count','topic-count'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
+  document.getElementById('topic-list').innerHTML='<div class="empty-state">Topics emerge as you talk.</div>';
+  ['depth','curiosity','complexity'].forEach(k=>{document.getElementById(k+'-bar').style.width='0%';document.getElementById(k+'-val').textContent='—'});
+  const sb=document.getElementById('summary-box'); if(sb) sb.innerHTML='<span class="empty-state">Summary will appear after a few exchanges.</span>';
+  const ss=document.getElementById('summary-section'); if(ss) ss.style.display='none';
+  document.getElementById('messages').innerHTML=`<div class="welcome" id="welcome"><div class="welcome-icon">◈</div><h1>Hello, I'm AXIOM</h1><p>Speak to me or type — I hold the full context of everything we've said, and I'll reply out loud.</p></div>`;
+  renderThreadsList();
+}
+function switchThread(id){
+  if(id===activeThreadId) return;
+  saveCurrentThread();
+  activeThreadId=id;
+  const t=threads.find(t=>t.id===id);
+  if(t) loadThread(t);
+  renderThreadsList();
+}
+function deleteThread(id){
+  if(threads.length<=1){ alert('Cannot delete the only conversation.'); return; }
+  threads=threads.filter(t=>t.id!==id);
+  if(activeThreadId===id){
+    activeThreadId=threads[threads.length-1].id;
+    loadThread(threads[threads.length-1]);
+  }
+  renderThreadsList();
+}
+function initThreads(){
+  const t=makeThread('Conversation 1');
+  threads=[t]; activeThreadId=t.id;
+  renderThreadsList();
+}
 
 // ════════════════════════════════════════════
 //  CONVERSATION SUMMARY
@@ -621,6 +743,13 @@ async function sendMessage(fromVoice=false){
     history.push({role:'assistant',content:fullReply});
     finalizeStreamingMsg(msgEl,fullReply,uTopics);
     updateSidebar(text,fullReply);
+    saveCurrentThread();
+    // Auto-rename thread from first user message
+    const activeT=threads.find(t=>t.id===activeThreadId);
+    if(activeT && activeT.history.length===2 && activeT.name.startsWith('Conversation')){
+      activeT.name=text.slice(0,30)+(text.length>30?'…':'');
+      renderThreadsList();
+    }
     exportLog.push({role:'ai',content:fullReply,time:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),isVoice:false,topics:detectTopics(fullReply)});
     if(voiceReplyOn) setTimeout(()=>speak(fullReply),300);
   }catch(err){
